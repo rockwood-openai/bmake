@@ -24,6 +24,4 @@ find_package(GTest CONFIG REQUIRED)
 
 include(cmake/rules.cmake)
 
-include_directories(${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_BINARY_DIR})
-
 add_subdirectory(src)
