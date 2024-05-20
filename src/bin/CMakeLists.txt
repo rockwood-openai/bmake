@@ -1,4 +1,4 @@
-my_cc_binary(
+landlock_cc_binary(
   NAME cli
   SRCS main.cc
   DEPS

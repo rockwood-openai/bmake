@@ -22,6 +22,8 @@ find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
+add_subdirectory(tools/sandbox)
+
 include(cmake/rules.cmake)
 
 add_subdirectory(src)

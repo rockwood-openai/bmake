@@ -1,6 +1,18 @@
 include(CMakeParseArguments)
 
-# my_cc_library()
+define_property(
+  TARGET
+  PROPERTY landlock_public_headers
+  BRIEF_DOCS "A list of public headers for a target, can be used for strict sandboxing of clang"
+)
+
+define_property(
+  TARGET
+  PROPERTY landlock_proto_files
+  BRIEF_DOCS "A list of .proto files that were used to generate this target, can be used for strict sandboxing of protoc"
+)
+
+# landlock_cc_library()
 #
 # CMake function to imitate a starlark-like cc_library rule.
 #
@@ -14,86 +26,92 @@ include(CMakeParseArguments)
 # LINKOPTS: List of link options
 #
 # Note:
-# By default, my_cc_library will always create a library named my_${NAME},
+# By default, landlock_cc_library will always create a library named my_${NAME},
 # and alias target my::${NAME}.  The my:: form should always be used.
 # This is to reduce namespace pollution.
 #
-# my_cc_library(
+# landlock_cc_library(
 #   NAME
 #     awesome
 #   HDRS
-#     "a.h"
+#     "awesome.h"
 #   SRCS
-#     "a.cc"
+#     "awesome.cc"
 # )
-# my_cc_library(
+# landlock_cc_library(
 #   NAME
-#     fantastic_lib
+#     fantastic
 #   SRCS
-#     "b.cc"
+#     "fantastic.cc"
 #   DEPS
 #     my::awesome # not "awesome" !
 # )
 #
-# my_cc_library(
+# landlock_cc_binary(
 #   NAME
-#     main_lib
+#     main
 #   ...
 #   DEPS
-#     my::fantastic_lib
+#     my::fantastic
 # )
 #
-function(my_cc_library)
-  cmake_parse_arguments(MY_CC_LIB
+function(landlock_cc_library)
+  cmake_parse_arguments(LANDLOCK_CC_LIB
     "" # options
     "NAME" # single value
     "HDRS;SRCS;COPTS;DEFINES;LINKOPTS;DEPS" # multi value 
     ${ARGN})
 
-  set(_NAME "my_${MY_CC_LIB_NAME}")
+  set(_NAME "landlock_${LANDLOCK_CC_LIB_NAME}")
 
   # Check if this is a header-only library
-  set(MY_CC_SRCS "${MY_CC_LIB_SRCS}")
-  list(FILTER MY_CC_SRCS EXCLUDE REGEX ".*\\.(h|inc)")
-  if("${MY_CC_SRCS}" STREQUAL "")
-    set(MY_CC_LIB_IS_INTERFACE 1)
+  set(LANDLOCK_CC_SRCS "${LANDLOCK_CC_LIB_SRCS}")
+  list(FILTER LANDLOCK_CC_SRCS EXCLUDE REGEX ".*\\.(h|inc)")
+  if("${LANDLOCK_CC_SRCS}" STREQUAL "")
+    set(LANDLOCK_CC_LIB_IS_INTERFACE 1)
   else()
-    set(MY_CC_LIB_IS_INTERFACE 0)
+    set(LANDLOCK_CC_LIB_IS_INTERFACE 0)
   endif()
 
-  if(NOT MY_CC_LIB_IS_INTERFACE)
+  if(NOT LANDLOCK_CC_LIB_IS_INTERFACE)
     add_library(${_NAME} "")
-    target_sources(${_NAME} PRIVATE ${MY_CC_LIB_SRCS} ${MY_CC_LIB_HDRS})
+    target_sources(${_NAME} PRIVATE ${LANDLOCK_CC_LIB_SRCS} ${LANDLOCK_CC_LIB_HDRS})
     # TODO: Determine how to limit header visibility
     # There are really 3 approaches:
     # - Symlink headers so that includes are limited (bazel does this), downside being some tooling is confused by symlinks
     # - Force include directory pattern . this basically puts the burden on the dev to isolate headers
     # - Use something like landlock LSM to sandbox headers via a wrapper and CXX_COMPILER_LAUNCHER
     target_compile_options(${_NAME}
-      PRIVATE ${MY_CC_LIB_COPTS})
+      PRIVATE ${LANDLOCK_CC_LIB_COPTS})
     target_link_libraries(${_NAME}
-      PUBLIC ${MY_CC_LIB_DEPS}
-      PRIVATE ${MY_CC_LIB_LINKOPTS})
-    target_compile_definitions(${_NAME} PUBLIC ${MY_CC_LIB_DEFINES})
+      PUBLIC ${LANDLOCK_CC_LIB_DEPS}
+      PRIVATE ${LANDLOCK_CC_LIB_LINKOPTS})
+    target_compile_definitions(${_NAME} PUBLIC ${LANDLOCK_CC_LIB_DEFINES})
   else()
     # Generating header-only library
     add_library(${_NAME} INTERFACE)
     # TODO: Limit header visibility - see options above
     target_link_libraries(${_NAME}
       INTERFACE
-      ${MY_CC_LIB_DEPS}
-      ${MY_CC_LIB_LINKOPTS}
+      ${LANDLOCK_CC_LIB_DEPS}
+      ${LANDLOCK_CC_LIB_LINKOPTS}
       )
-    target_compile_definitions(${_NAME} INTERFACE ${MY_CC_LIB_DEFINES})
+    target_compile_definitions(${_NAME} INTERFACE ${LANDLOCK_CC_LIB_DEFINES})
   endif()
+
+  set(LANDLOCK_CC_HDRS "${LANDLOCK_CC_HDRS}")
+  # Use absolute paths
+  list(TRANSFORM LANDLOCK_CC_SRCS PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
+  # TODO(rockwood): add dependencies
+  set_target_properties(${_NAME} PROPERTIES landlock_public_headers "${LANDLOCK_CC_LIB_HDRS}")
   # main symbol exported
-  add_library(my::${MY_CC_LIB_NAME} ALIAS ${_NAME})
+  add_library(my::${LANDLOCK_CC_LIB_NAME} ALIAS ${_NAME})
 endfunction()
 
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
 
-# my_proto_library()
+# landlock_proto_library()
 #
 # CMake function to imitate a starlark-like cc_proto_library rule.
 #
@@ -106,14 +124,14 @@ find_package(gRPC CONFIG REQUIRED)
 # LINKOPTS: List of link options
 # GRPC: If the gRPC protoc plugin should be used.
 #
-# my_proto_library(
+# landlock_proto_library(
 #   NAME
 #     foo
 #   SRCS
 #     "foo.proto"
 # )
 #
-# my_cc_library(
+# landlock_cc_library(
 #   NAME
 #     awesome_lib
 #   SRCS
@@ -122,27 +140,27 @@ find_package(gRPC CONFIG REQUIRED)
 #     my::foo
 # )
 #
-function(my_proto_library)
-  cmake_parse_arguments(MY_PROTO_LIB
+function(landlock_proto_library)
+  cmake_parse_arguments(LANDLOCK_PROTO_LIB
     "GRPC" # options
     "NAME" # single value
     "SRCS;COPTS;DEFINES;LINKOPTS;DEPS" # multi value 
     ${ARGN})
 
-  set(_NAME "my_protoc_generated_sources_${MY_PROTO_LIB_NAME}")
+  set(_NAME "landlock_protoc_generated_sources_${LANDLOCK_PROTO_LIB_NAME}")
 
   # TODO: Add import dirs for dependencies, right now this assumes all protos
   # are in a single directory
   protobuf_generate(
-    PROTOS ${MY_PROTO_LIB_SRCS}
+    PROTOS ${LANDLOCK_PROTO_LIB_SRCS}
     LANGUAGE cpp
     GENERATE_EXTENSIONS .pb.h .pb.cc
     OUT_VAR _generated_pb
   )
   set(_extra_deps "")
-  if (MY_PROTO_LIB_GRPC)
+  if (LANDLOCK_PROTO_LIB_GRPC)
     protobuf_generate(
-      PROTOS ${MY_PROTO_LIB_SRCS}
+      PROTOS ${LANDLOCK_PROTO_LIB_SRCS}
       LANGUAGE grpc
       GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
       PLUGIN "protoc-gen-grpc=\$<TARGET_FILE:gRPC::grpc_cpp_plugin>"
@@ -159,23 +177,28 @@ function(my_proto_library)
   list(FILTER GENERATED_HDRS INCLUDE REGEX ".*\\.(h|inc)")
   set(GENERATED_SRCS "${_generated_pb}")
   list(FILTER GENERATED_SRCS EXCLUDE REGEX ".*\\.(h|inc)")
-  my_cc_library(
-    NAME ${MY_PROTO_LIB_NAME}
+  landlock_cc_library(
+    NAME ${LANDLOCK_PROTO_LIB_NAME}
     HDRS ${GENERATED_HDRS}
     SRCS ${GENERATED_SRCS}
     DEPS 
-      ${MY_PROTO_LIB_DEPS}
+      ${LANDLOCK_PROTO_LIB_DEPS}
       protobuf::libprotobuf
       ${_extra_deps}
-    COPTS ${MY_PROTO_LIB_COPTS}
-    DEFINES ${MY_PROTO_LIB_DEFINES}
-    LINKOPTS ${MY_PROTO_LIB_LINKOPTS}
+    COPTS ${LANDLOCK_PROTO_LIB_COPTS}
+    DEFINES ${LANDLOCK_PROTO_LIB_DEFINES}
+    LINKOPTS ${LANDLOCK_PROTO_LIB_LINKOPTS}
   )
+  set(LANDLOCK_PROTOS "${LANDLOCK_PROTO_LIB_SRCS}")
+  # Use absolute paths
+  list(TRANSFORM LANDLOCK_PROTOS PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/)
+  # TODO(rockwood): add dependencies
+  set_target_properties(my::${LANDLOCK_PROTO_LIB_NAME} PROPERTIES landlock_proto_files "${LANDLOCK_PROTOS}")
 endfunction()
 
 find_package(GTest REQUIRED)
 
-# my_cc_test()
+# landlock_cc_test()
 #
 # CMake function to imitate a starlark-like cc_test rule.
 #
@@ -188,11 +211,11 @@ find_package(GTest REQUIRED)
 # LINKOPTS: List of link options
 #
 # Note:
-# By default, my_cc_test will always create a binary named my_${NAME}.
-# This will also add it to ctest list as my_${NAME}.
+# By default, landlock_cc_test will always create a binary named my_${NAME}.
+# This will also add it to ctest list as landlock_${NAME}.
 #
 # Usage:
-# my_cc_library(
+# landlock_cc_library(
 #   NAME
 #     awesome
 #   HDRS
@@ -201,7 +224,7 @@ find_package(GTest REQUIRED)
 #     "a.cc"
 # )
 #
-# my_cc_test(
+# landlock_cc_test(
 #   NAME
 #     awesome_test
 #   SRCS
@@ -211,31 +234,31 @@ find_package(GTest REQUIRED)
 #     GTest::gmock
 #     GTest::gtest_main
 # )
-function(my_cc_test)
-  cmake_parse_arguments(MY_CC_TEST
+function(landlock_cc_test)
+  cmake_parse_arguments(LANDLOCK_CC_TEST
     ""
     "NAME"
     "SRCS;COPTS;DEFINES;LINKOPTS;DEPS"
     ${ARGN}
   )
 
-  set(_NAME "my_${MY_CC_TEST_NAME}")
+  set(_NAME "landlock_${LANDLOCK_CC_TEST_NAME}")
 
   add_executable(${_NAME} "")
-  target_sources(${_NAME} PRIVATE ${MY_CC_TEST_SRCS})
+  target_sources(${_NAME} PRIVATE ${LANDLOCK_CC_TEST_SRCS})
 
   target_compile_definitions(${_NAME}
-    PUBLIC ${MY_CC_TEST_DEFINES})
+    PUBLIC ${LANDLOCK_CC_TEST_DEFINES})
   target_compile_options(${_NAME}
-    PRIVATE ${MY_CC_TEST_COPTS})
+    PRIVATE ${LANDLOCK_CC_TEST_COPTS})
 
   target_link_libraries(${_NAME}
-    PUBLIC ${MY_CC_TEST_DEPS}
-    PRIVATE ${MY_CC_TEST_LINKOPTS})
+    PUBLIC ${LANDLOCK_CC_TEST_DEPS}
+    PRIVATE ${LANDLOCK_CC_TEST_LINKOPTS})
   gtest_discover_tests(${_NAME})
 endfunction()
 
-# my_cc_binary()
+# landlock_cc_binary()
 #
 # CMake function to imitate a starlark-like cc_binary rule.
 #
@@ -250,12 +273,12 @@ endfunction()
 # DESTINATION: Subdirectory to install the binary (in `ninja install`)
 #
 # Note:
-# By default, my_cc_binary will always create a binary named ${NAME}.
+# By default, landlock_cc_binary will always create a binary named ${NAME}.
 # Additionally, it's listed as a target to install, which can be changed 
 # with the DISABLE_INSTALL option.
 #
 # Usage:
-# my_cc_library(
+# landlock_cc_library(
 #   NAME
 #     awesome
 #   HDRS
@@ -264,7 +287,7 @@ endfunction()
 #     "a.cc"
 # )
 #
-# my_cc_binary(
+# landlock_cc_binary(
 #   NAME
 #     awesome_binary
 #   SRCS
@@ -272,35 +295,35 @@ endfunction()
 #   DEPS
 #     my::awesome
 # )
-function(my_cc_binary)
-  cmake_parse_arguments(MY_CC_BINARY
+function(landlock_cc_binary)
+  cmake_parse_arguments(LANDLOCK_CC_BINARY
     "DISABLE_INSTALL"
     "NAME"
     "SRCS;COPTS;DEFINES;LINKOPTS;DEPS;DESTINATION"
     ${ARGN}
   )
 
-  add_executable(${MY_CC_BINARY_NAME} "")
-  target_sources(${MY_CC_BINARY_NAME} PRIVATE ${MY_CC_BINARY_SRCS})
+  add_executable(${LANDLOCK_CC_BINARY_NAME} "")
+  target_sources(${LANDLOCK_CC_BINARY_NAME} PRIVATE ${LANDLOCK_CC_BINARY_SRCS})
 
   target_compile_definitions(
-    ${MY_CC_BINARY_NAME}
-    PUBLIC ${MY_CC_BINARY_DEFINES}
+    ${LANDLOCK_CC_BINARY_NAME}
+    PUBLIC ${LANDLOCK_CC_BINARY_DEFINES}
   )
   target_compile_options(
-    ${MY_CC_BINARY_NAME}
-    PRIVATE ${MY_CC_BINARY_COPTS}
+    ${LANDLOCK_CC_BINARY_NAME}
+    PRIVATE ${LANDLOCK_CC_BINARY_COPTS}
   )
 
   target_link_libraries(
-    ${MY_CC_BINARY_NAME}
-    PUBLIC ${MY_CC_BINARY_DEPS}
-    PRIVATE ${MY_CC_BINARY_LINKOPTS}
+    ${LANDLOCK_CC_BINARY_NAME}
+    PUBLIC ${LANDLOCK_CC_BINARY_DEPS}
+    PRIVATE ${LANDLOCK_CC_BINARY_LINKOPTS}
   )
-  if(NOT MY_CC_BINARY_DISABLE_INSTALL)
+  if(NOT LANDLOCK_CC_BINARY_DISABLE_INSTALL)
     install(
-      TARGETS ${MY_CC_BINARY_NAME}
-      DESTINATION ${MY_CC_BINARY_DESTINATION}
+      TARGETS ${LANDLOCK_CC_BINARY_NAME}
+      DESTINATION ${LANDLOCK_CC_BINARY_DESTINATION}
     )
   endif()
 endfunction()
