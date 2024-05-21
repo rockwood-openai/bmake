@@ -337,7 +337,9 @@ ParsedArgs ParseCommandLine(std::span<std::string> args) {
                            "\t--ro_paths \n\t\ta colon delimited list of "
                            "readonly directories and files\n"
                            "\t--rw_paths \n\t\ta colon delimited list of "
-                           "readwrite directories and files\n");
+                           "readwrite directories and files\n\n"
+                           "NOTE: All flags above refer to a path and *all* "
+                           "paths below it - rules are applied recursively");
       std::exit(0);
     }
     ParsePathArg(arg, &args, &parsed);
@@ -354,35 +356,40 @@ int main(int argc, char **argv) {
   if (!landlock::Enabled()) {
     return Exec(parsed.remainder);
   }
-  auto ruleset = landlock::Ruleset::Create();
-  // Basically all programs need to load glibc and other system libaries,
-  // so make sure they are readable.
-  std::vector<std::filesystem::path> automatic_readonly_paths = {
-      "/usr", "/bin", "/var", "/lib", "/lib32", "/lib64",
-  };
-  for (const auto &p : automatic_readonly_paths) {
-    ruleset.Allow(p, landlock::FSAccess::Readonly());
+  try {
+    auto ruleset = landlock::Ruleset::Create();
+    // Basically all programs need to load glibc and other system libaries,
+    // so make sure they are readable.
+    std::vector<std::filesystem::path> automatic_readonly_paths = {
+        "/usr", "/bin", "/var", "/lib", "/lib32", "/lib64",
+    };
+    for (const auto &p : automatic_readonly_paths) {
+      ruleset.Allow(p, landlock::FSAccess::Readonly());
+    }
+    // Give some scratch space in tmp to all programs
+    std::vector<std::filesystem::path> automatic_readwrite_paths = {
+        "/tmp",
+    };
+    for (const auto &p : automatic_readwrite_paths) {
+      ruleset.Allow(p, landlock::FSAccess::All());
+    }
+    for (const auto &p : parsed.ro_dirs) {
+      ruleset.Allow(p, landlock::FSAccess::AllDir() &
+                           landlock::FSAccess::Readonly());
+    }
+    for (const auto &p : parsed.rw_dirs) {
+      ruleset.Allow(p, landlock::FSAccess::AllDir());
+    }
+    for (const auto &p : parsed.ro_paths) {
+      ruleset.Allow(p, landlock::FSAccess::Readonly());
+    }
+    for (const auto &p : parsed.rw_paths) {
+      ruleset.Allow(p, landlock::FSAccess::All());
+    }
+    ruleset.Apply();
+  } catch (const std::exception &ex) {
+    fmt::println(stderr, "Failed to apply landlock ruleset: {}", ex.what());
+    return 1;
   }
-  // Give some scratch space in tmp to all programs
-  std::vector<std::filesystem::path> automatic_readwrite_paths = {
-      "/tmp",
-  };
-  for (const auto &p : automatic_readwrite_paths) {
-    ruleset.Allow(p, landlock::FSAccess::All());
-  }
-  for (const auto &p : parsed.ro_dirs) {
-    ruleset.Allow(p, landlock::FSAccess::AllDir() &
-                         landlock::FSAccess::Readonly());
-  }
-  for (const auto &p : parsed.rw_dirs) {
-    ruleset.Allow(p, landlock::FSAccess::AllDir());
-  }
-  for (const auto &p : parsed.ro_paths) {
-    ruleset.Allow(p, landlock::FSAccess::Readonly());
-  }
-  for (const auto &p : parsed.rw_paths) {
-    ruleset.Allow(p, landlock::FSAccess::All());
-  }
-  ruleset.Apply();
   return Exec(parsed.remainder);
 }
